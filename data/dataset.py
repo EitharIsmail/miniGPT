@@ -10,7 +10,14 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 
+from functools import partial # for collate_fn customization
+
 from config import DATA_DIR, MAX_LEN, STRIDE, BATCH_SIZE
+
+#instruction follower imports
+import json 
+import os
+import urllib
 
 
 class GPT2Dataset(Dataset):
@@ -45,3 +52,96 @@ def get_loaders(
         return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, drop_last=True)
 
     return _make("train", True), _make("val", False), _make("test", False)
+
+#-----------------------------------------------------------
+#               Instruction Follower utilities
+#-----------------------------------------------------------
+
+def download_and_load_file(file_path, url) -> dict:
+    if not os.path.exists(file_path):
+        with urllib.request.urlopen(url) as response:
+            text_data = response.read().decode("utf-8")
+        with open(file_path, "w", encoding="utf-8") as file:
+            file.write(text_data)
+    else:
+        with open(file_path, "r", encoding="utf-8") as file:
+            text_data = file.read()
+    with open(file_path, "r") as file:
+        data = json.load(file)
+    return data
+
+
+def format_input(entry: dict):
+    instruction_text = (
+        f"Below is an instruction that describes a task. "
+        f"Write a response that appropriately completes the request."
+        f"\n\n### Instruction:\n{entry['instruction']}"
+    )
+    input_text = (
+        f"\n\n### Input: \n{entry['input']}" if entry['input'] else ""
+    )
+    return instruction_text + input_text
+# ------------------Instruction follower dataset  ---------------------------
+class InstructionDataset(Dataset):
+    def __init__(self, data, tokenizer):
+        self.tokenized_text = []
+        for entry in data:
+            formated_text = format_input(entry=entry)
+            response_text = f"\n\n### Response: \n{entry['output']}"
+            full_text = formated_text + response_text
+            self.tokenized_text.append(
+                tokenizer.encode(full_text)
+            )
+        
+    def __getitem__(self, index):
+        return self.tokenized_text[index]
+    def __len__(self):
+        return len(self.tokenized_text)
+
+
+
+# --------------------- Custom collate function --------------------------
+def custom_collat_fn(
+        batch,
+        pad_token_id=50256,
+        ignore_index=-100,
+        allowed_max_length=None,
+        device="cpu"
+    ):
+    batch_max_length = max(len(item)+1 for item in batch)
+    inputs_lst, targets_lst = [], []
+
+    for item in batch:
+        new_item = item.copy()
+        new_item += [pad_token_id]
+
+        padded = (
+            new_item + [pad_token_id] * (batch_max_length - len(new_item))
+        )
+        inputs = torch.tensor(padded[:-1])
+        targets = torch.tensor(padded[1:])
+
+        mask = targets==pad_token_id
+        indices = torch.nonzero(mask).squeeze()
+        if indices.numel() > 1:
+            targets[indices[1:]] = ignore_index
+
+        if allowed_max_length is not None:
+            inputs = inputs[:allowed_max_length]
+            targets = targets[:allowed_max_length]
+
+        inputs_lst.append(inputs)
+        targets_lst.append(targets)
+
+    inputs_tensor = torch.stack(inputs_lst).to(device)
+    targets_tensor = torch.stack(targets_lst).to(device)
+
+    return inputs_tensor, targets_tensor
+
+# ---------------- instruction follower dataloaders ------------------
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+customized_collate_fn = partial(
+    custom_collat_fn,
+    allowed_max_length=1024
+    device=device,
+)
