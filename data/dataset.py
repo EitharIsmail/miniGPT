@@ -17,7 +17,7 @@ from config import DATA_DIR, MAX_LEN, STRIDE, BATCH_SIZE
 #instruction follower imports
 import json 
 import os
-import urllib
+import urllib.request
 
 
 class GPT2Dataset(Dataset):
@@ -58,6 +58,10 @@ def get_loaders(
 #-----------------------------------------------------------
 
 def download_and_load_file(file_path, url) -> dict:
+    # If the URL is a GitHub blob URL, convert it to a raw URL
+    if "github.com" in url and "/blob/" in url:
+        url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+
     if not os.path.exists(file_path):
         with urllib.request.urlopen(url) as response:
             text_data = response.read().decode("utf-8")
@@ -66,8 +70,24 @@ def download_and_load_file(file_path, url) -> dict:
     else:
         with open(file_path, "r", encoding="utf-8") as file:
             text_data = file.read()
-    with open(file_path, "r") as file:
-        data = json.load(file)
+    
+    try:
+        with open(file_path, "r") as file:
+            data = json.load(file)
+    except json.JSONDecodeError:
+        # If it fails, maybe the file was already downloaded incorrectly (e.g. as HTML)
+        # Delete it and try one more time if we just used the original URL
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        
+        with urllib.request.urlopen(url) as response:
+            text_data = response.read().decode("utf-8")
+        with open(file_path, "w", encoding="utf-8") as file:
+            file.write(text_data)
+        
+        with open(file_path, "r") as file:
+            data = json.load(file)
+            
     return data
 
 
@@ -142,6 +162,6 @@ def custom_collat_fn(
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 customized_collate_fn = partial(
     custom_collat_fn,
-    allowed_max_length=1024
+    allowed_max_length=1024,
     device=device,
 )
