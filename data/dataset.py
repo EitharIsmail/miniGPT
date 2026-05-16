@@ -18,6 +18,7 @@ from config import DATA_DIR, MAX_LEN, STRIDE, BATCH_SIZE, PAD_TOKEN_ID, INGNORE_
 import json 
 import os
 import urllib.request
+import random
 """
 WE  MUST ADD INSTRUCTION FINETUNING CONFIGURATION
 """
@@ -91,6 +92,22 @@ def download_and_load_file(file_path, url) -> dict:
             data = json.load(file)
             
     return data
+
+def data_split(
+        file_path
+):
+    with open(file_path, "r") as file:
+        data = json.load(file)
+
+    train_portion = int(len(data) * 0.85)  # 85% for training
+    test_portion = int(len(data) * 0.1)   # 10% for testing
+    val_portion = len(data) - train_portion - test_portion 
+    
+    train_data = data[:train_portion]
+    test_data = data[train_portion:train_portion + test_portion]  
+    val_data = data[train_portion + test_portion:]
+
+    return train_data, test_data, val_data
 
 
 def format_input(entry: dict):
