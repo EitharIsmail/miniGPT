@@ -12,13 +12,15 @@ from torch.utils.data import Dataset, DataLoader
 
 from functools import partial # for collate_fn customization
 
-from config import DATA_DIR, MAX_LEN, STRIDE, BATCH_SIZE
+from config import DATA_DIR, MAX_LEN, STRIDE, BATCH_SIZE, PAD_TOKEN_ID, INGNORE_INDEX, ALLOWED_MAX_LENGTH
 
 #instruction follower imports
 import json 
 import os
 import urllib.request
-
+"""
+WE  MUST ADD INSTRUCTION FINETUNING CONFIGURATION
+"""
 
 class GPT2Dataset(Dataset):
     def __init__(self, file_path: Path, max_length: int, stride: int):
@@ -121,12 +123,12 @@ class InstructionDataset(Dataset):
 
 
 # --------------------- Custom collate function --------------------------
-def custom_collat_fn(
+def custom_collate_fn(
         batch,
-        pad_token_id=50256,
-        ignore_index=-100,
-        allowed_max_length=None,
-        device="cpu"
+        pad_token_id=PAD_TOKEN_ID,
+        ignore_index=INGNORE_INDEX,
+        allowed_max_length=ALLOWED_MAX_LENGTH,
+        device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ):
     batch_max_length = max(len(item)+1 for item in batch)
     inputs_lst, targets_lst = [], []
@@ -159,9 +161,27 @@ def custom_collat_fn(
     return inputs_tensor, targets_tensor
 
 # ---------------- instruction follower dataloaders ------------------
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-customized_collate_fn = partial(
-    custom_collat_fn,
-    allowed_max_length=1024,
-    device=device,
-)
+
+
+
+def get_instruction_loaders(
+    data_dir,
+    tokenizer,
+    batch_size = BATCH_SIZE,
+):
+    def _make(split, shuffle):
+        path = Path(data_dir) / f"{split}.json"
+        if not path.exists():
+            raise FileNotFoundError(
+                f"{path} not found — run: python cli.py prepare"
+            )
+        with open(path, "r") as file:
+            data = json.load(file)
+        ds = InstructionDataset(data=data, tokenizer=tokenizer)
+        return DataLoader(
+            ds, batch_size=batch_size,
+            shuffle=shuffle, drop_last=True,
+            collate_fn=custom_collate_fn
+            )
+
+    return _make("train", True), _make("val", False), _make("test", False)

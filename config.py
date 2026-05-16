@@ -144,3 +144,11 @@ GEN_TEMPERATURE = 0.8
 GEN_TOP_K       = 50
 GEN_TOP_P       = 0.9
 GEN_BEAMS       = 3
+
+# ── Instruction follower ─────────────────────────────────────────────────────────
+
+
+PAD_TOKEN_ID = 50256
+INGNORE_INDEX = -100
+ALLOWED_MAX_LENGTH = None
+
