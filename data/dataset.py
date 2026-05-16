@@ -93,20 +93,37 @@ def download_and_load_file(file_path, url) -> dict:
             
     return data
 
-def data_split(
-        file_path
-):
+
+def data_split(file_path, output_dir="."):
+    # 1. Load the original data
     with open(file_path, "r") as file:
         data = json.load(file)
 
+    # 2. Calculate split indices
     train_portion = int(len(data) * 0.85)  # 85% for training
-    test_portion = int(len(data) * 0.1)   # 10% for testing
-    val_portion = len(data) - train_portion - test_portion 
+    test_portion = int(len(data) * 0.1)    # 10% for testing
     
+    # 3. Slice the data
     train_data = data[:train_portion]
     test_data = data[train_portion:train_portion + test_portion]  
     val_data = data[train_portion + test_portion:]
 
+    # 4. Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 5. Save the splits to separate JSON files
+    with open(os.path.join(output_dir, "train.json"), "w") as f:
+        json.dump(train_data, f, indent=4)
+        
+    with open(os.path.join(output_dir, "test.json"), "w") as f:
+        json.dump(test_data, f, indent=4)
+        
+    with open(os.path.join(output_dir, "val.json"), "w") as f:
+        json.dump(val_data, f, indent=4)
+
+    print(f"Splits saved: train.json, test.json, val.json in '{output_dir}'")
+    
+    # Returning the data just in case you still need to use it right away
     return train_data, test_data, val_data
 
 
