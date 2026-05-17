@@ -147,7 +147,8 @@ GEN_BEAMS       = 3
 
 # ── Instruction follower ─────────────────────────────────────────────────────────
 
-
+# ======= DATA =======
+INSTRUCTION_DATA_DIR = ROOT / "instruction-follower-data"
 PAD_TOKEN_ID = 50256
 INGNORE_INDEX = -100
 ALLOWED_MAX_LENGTH = None

@@ -94,7 +94,7 @@ def download_and_load_file(file_path, url) -> dict:
     return data
 
 
-def data_split(file_path, output_dir="."):
+def data_split(file_path, output_dir: str | Path="."):
     # 1. Load the original data
     with open(file_path, "r") as file:
         data = json.load(file)
