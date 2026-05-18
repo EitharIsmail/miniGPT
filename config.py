@@ -152,4 +152,4 @@ INSTRUCTION_DATA_DIR = ROOT / "instruction-follower-data"
 PAD_TOKEN_ID = 50256
 INGNORE_INDEX = -100
 ALLOWED_MAX_LENGTH = None
-
+VARIANT = "gpt2"  # or "gpt2-medium", "gpt2-large", "gpt2-xl" for pretrained weights or the path of your local checkpoint
