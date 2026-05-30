@@ -11,9 +11,9 @@ Requires:
 
 import modal
 from pathlib import Path
-from instructure_follower_finetuning import loading_model, data_split, split_and_get_loaders
-from config import INSTRUCTION_DATA_DIR, VARIANT, HF_MODELS, MODEL_PRESETS, INSTRUCTION_MODEL_CONFIG
-ROOT      = Path(__file__).parent.parent
+from train.instructure_follower_finetuning import loading_model, data_split, split_and_get_loaders
+from config import INSTRUCTION_DATA_DIR, VARIANT, HF_MODELS, MODEL_PRESET
+ROOT      = Path.cwd()# Path(__file__).parent.parent
 DATA_DIR  = ROOT /"instruction_data"
     
 REMOTE_DATA = "/data"

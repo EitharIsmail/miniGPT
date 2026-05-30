@@ -2,7 +2,7 @@ from data.dataset import download_and_load_file , data_split, get_instruction_lo
 from inference.load_weights import load_from_hf
 from train.trainer import calc_loss_loader , train
 from inference.generate import generate
-from config import MAX_LEN, INSTRUCTION_DATA_DIR ,VARIANT, MODEL_CONFIG, HF_MODELS, MODEL_PRESETS
+from config import MAX_LEN, INSTRUCTION_DATA_DIR ,VARIANT, MODEL_CONFIG, HF_MODELS, MODEL_PRESET
 import tiktoken
 import torch
 import os
@@ -17,10 +17,7 @@ device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #data = download_and_load_file("instruction_data.json","https://github.com/rasbt/LLMs-from-scratch/blob/main/ch07/01_main-chapter-code/instruction-data.json")
 # Loading data from the user uploaded file and split it
 def split_and_get_loaders(INSTRUCTION_DATA_DIR):
-    user_file = os.listdir(INSTRUCTION_DATA_DIR)
-    user_file.remove("example.json")
-    if len(user_file) >=1:
-        user_file = user_file[0]
+    user_file = INSTRUCTION_DATA_DIR / "instrution-data.json"
     train_data ,test,val = data_split(user_file, output_dir=INSTRUCTION_DATA_DIR)
     tokenizer = tiktoken.get_encoding("gpt2")
 
@@ -51,6 +48,7 @@ def loading_model(VARIANT):
             raise ValueError(f"Unknown model variant: {VARIANT}. Please choose from {list(MODEL_PRESETS.keys())} or use a HuggingFace variant with --hf.")
     return model , config
 # Calculate the loss before finetuning
+"""
 model = loading_model(VARIANT)
 torch.manual_seed(123)
 with torch.no_grad():
@@ -97,3 +95,4 @@ for entry in test[:3]:
     print(f"\nModel response:\n>> {response_text.strip()}")
     print("-------------------------------------")
 
+"""
