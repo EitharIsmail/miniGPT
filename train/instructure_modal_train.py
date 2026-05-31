@@ -2,7 +2,7 @@
 train/modal_train.py — run trainer on Modal cloud GPU.
 
 Usage:
-    uv run python -m modal run train/modal_train.py          # train
+    uv run python -m modal run train/instructure_modal_train.py::main         # train
     uv run python -m modal run train/modal_train.py::download # download final checkpoint
 
 Requires:
