@@ -6,6 +6,7 @@ from config import MAX_LEN, INSTRUCTION_DATA_DIR ,VARIANT, MODEL_CONFIG, HF_MODE
 import tiktoken
 import torch
 import os
+from pathlib import Path
 
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -17,7 +18,7 @@ device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #data = download_and_load_file("instruction_data.json","https://github.com/rasbt/LLMs-from-scratch/blob/main/ch07/01_main-chapter-code/instruction-data.json")
 # Loading data from the user uploaded file and split it
 def split_and_get_loaders(INSTRUCTION_DATA_DIR):
-    user_file = INSTRUCTION_DATA_DIR / "instrution-data.json"
+    user_file = Path(INSTRUCTION_DATA_DIR) / "instrution-data.json"
     train_data ,test,val = data_split(user_file, output_dir=INSTRUCTION_DATA_DIR)
     tokenizer = tiktoken.get_encoding("gpt2")
 

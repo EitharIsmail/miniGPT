@@ -11,10 +11,11 @@ Requires:
 
 import modal
 from pathlib import Path
-from train.instructure_follower_finetuning import loading_model, data_split, split_and_get_loaders
-from config import INSTRUCTION_DATA_DIR, VARIANT, HF_MODELS, MODEL_PRESET
+import os
 ROOT      = Path.cwd()# Path(__file__).parent.parent
-DATA_DIR  = ROOT /"instruction_data"
+DATA_DIR  = ROOT /"instruction-follower-data"
+if not os.path.exists(DATA_DIR):
+    os.mkdir(DATA_DIR)
     
 REMOTE_DATA = "/data"
 REMOTE_CKPT = "/checkpoints"
@@ -61,6 +62,8 @@ def train_fn():
     from data.dataset  import get_loaders
     from model.gpt     import GPTModel
     from train.trainer import train
+    from train.instructure_follower_finetuning import loading_model, data_split, split_and_get_loaders
+    from config import INSTRUCTION_DATA_DIR, VARIANT, HF_MODELS, MODEL_PRESET
 
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
