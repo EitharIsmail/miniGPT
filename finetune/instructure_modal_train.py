@@ -62,7 +62,7 @@ def train_fn():
     from data.dataset  import get_loaders
     from model.gpt     import GPTModel
     from train.trainer import train
-    from train.instructure_follower_finetuning import loading_model, data_split, split_and_get_loaders
+    from finetune.instructure_follower_finetuning import loading_model, data_split, split_and_get_loaders
     from config import INSTRUCTION_DATA_DIR, VARIANT, HF_MODELS, MODEL_PRESET
 
     
