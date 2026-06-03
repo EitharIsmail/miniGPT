@@ -172,7 +172,7 @@ def train_fn() -> None:
     import torch
 
     from config import MODEL_PRESET, MODELS, VARIANT
-    from train.instructure_follower_finetuning import (
+    from finetune.instructure_follower_finetuning import (
         loading_model,
         split_and_get_loaders,
     )
