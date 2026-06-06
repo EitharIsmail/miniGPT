@@ -5,7 +5,7 @@ import pytest
 
 
 def test_split_and_get_loaders_returns_three_loaders(tmp_path):
-    from train.instructure_follower_finetuning import split_and_get_loaders
+    from finetune.instructure_follower_finetuning import split_and_get_loaders
 
     data = [
         {"instruction": f"Question {i}", "input": "", "output": f"Answer {i}"}
@@ -32,14 +32,14 @@ def test_split_and_get_loaders_returns_three_loaders(tmp_path):
 
 
 def test_split_and_get_loaders_raises_on_missing_json(tmp_path):
-    from train.instructure_follower_finetuning import split_and_get_loaders
+    from finetune.instructure_follower_finetuning import split_and_get_loaders
 
     with pytest.raises(FileNotFoundError):
         split_and_get_loaders(tmp_path)
 
 
 def test_loading_model_returns_model_and_config_from_local_checkpoint(tmp_path, monkeypatch):
-    from train.instructure_follower_finetuning import loading_model
+    from finetune.instructure_follower_finetuning import loading_model
     from model.gpt import GPTModel
 
     tiny_config = {
@@ -70,7 +70,7 @@ def test_loading_model_returns_model_and_config_from_local_checkpoint(tmp_path, 
 
 
 def test_loading_model_from_hf_variant(monkeypatch):
-    from train.instructure_follower_finetuning import loading_model
+    from finetune.instructure_follower_finetuning import loading_model
 
     mock_model = torch.nn.Linear(10, 10)
     mock_config = {"context_length": 128}
