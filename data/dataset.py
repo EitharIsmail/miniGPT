@@ -19,6 +19,8 @@ import json
 import os
 import urllib.request
 import random
+import pandas as pd
+
 """
 WE  MUST ADD INSTRUCTION FINETUNING CONFIGURATION
 """
@@ -224,7 +226,6 @@ def get_instruction_loaders(
 #                       Classification
 # ---------------------------------------------------------
 
-import pandas as pd
 
 def create_balanced_dataset(df):
     num_spam = df[df["Label"] == "spam"].shape[0]
@@ -298,3 +299,62 @@ class SpamDataset(Dataset):
             if encoded_length > max_length:
                 max_length = encoded_length
         return max_length
+
+def get_classification_dataloaders(csv_path: str):
+    """
+    steps: 
+        1. read the csv file.
+        2. split the data into train, val, test.
+        3. save the splitted data (the data class accepts only csv paths).
+        4. initialize datasets.
+        5. create dataloaders.
+        6. return dataloaders.
+    """
+    import tiktoken
+    try:
+        df = pd.read_csv(csv_path)
+    except:
+        df = pd.read_csv("/content/miniGPT/SMSSpamCollection.csv", sep="\t", names=["Label", "Text"])
+    
+    random_split(df, 0.7, 0.1)
+    tokenizer = tiktoken.get_encoding("gpt2")
+
+    train_dataset = SpamDataset(
+        csv_file="train.csv",
+        max_length=None,
+        tokenizer=tokenizer
+    )
+    val_dataset = SpamDataset(
+        csv_file="validation.csv",
+        max_length=train_dataset.max_length,
+        tokenizer=tokenizer
+    )
+    test_dataset = SpamDataset(
+        csv_file="test.csv",
+        max_length=train_dataset.max_length,
+        tokenizer=tokenizer
+    )
+
+    num_workers = 0
+    batch_size = 8
+
+    train_loader = DataLoader(
+        dataset=train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        drop_last=True,
+    )
+    val_loader = DataLoader(
+        dataset=val_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        drop_last=False,
+    )
+    test_loader = DataLoader(
+        dataset=test_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        drop_last=False
+    )
+    return train_loader, val_loader, test_loader
