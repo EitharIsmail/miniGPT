@@ -243,23 +243,26 @@ def create_balanced_dataset(df):
     balanced_df = balanced_df["Label"].map({"ham": 0, "spam": 1})
     return balanced_df
 
-def random_split(df, train_frac, validation_frac):
-    # Shuffles the entire
-    # DataFrame
-    df = df.sample(
-    frac=1, random_state=123
-    # Calculates
-    ).reset_index(drop=True)
-    # split indices
+def random_split(df, train_frac, validation_frac, output_dir="."):
+    # Shuffles the entire DataFrame
+    df = df.sample(frac=1, random_state=123).reset_index(drop=True)
+    
+    # Calculates split indices
     train_end = int(len(df) * train_frac)
     validation_end = train_end + int(len(df) * validation_frac)
+    
     # Splits the DataFrame
     train_df = df[:train_end]
     validation_df = df[train_end:validation_end]
     test_df = df[validation_end:]
-    train_df.to_csv("train.csv", index=None)
-    validation_df.to_csv("validation.csv", index=None)
-    test_df.to_csv("test.csv", index=None)
+    
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    train_df.to_csv(out_path / "train.csv", index=None)
+    validation_df.to_csv(out_path / "validation.csv", index=None)
+    test_df.to_csv(out_path / "test.csv", index=None)
+    
     return train_df, validation_df, test_df
 
 class SpamDataset(Dataset):
@@ -284,6 +287,9 @@ class SpamDataset(Dataset):
     def __getitem__(self, index):
         encoded = self.encoded_texts[index]
         label = self.data.iloc[index]["Label"]
+        # Convert label to 1 if spam, 0 if ham if it's still text
+        if isinstance(label, str):
+            label = 1 if label == "spam" else 0
         return (
             torch.tensor(encoded, dtype=torch.long),
             torch.tensor(label, dtype=torch.long)
@@ -300,37 +306,47 @@ class SpamDataset(Dataset):
                 max_length = encoded_length
         return max_length
 
-def get_classification_dataloaders(csv_path: str):
+def get_classification_dataloaders(csv_path: str, output_dir: str = "."):
     """
     steps: 
         1. read the csv file.
-        2. split the data into train, val, test.
-        3. save the splitted data (the data class accepts only csv paths).
-        4. initialize datasets.
-        5. create dataloaders.
-        6. return dataloaders.
+        2. balance the dataset (equal ham and spam).
+        3. split the data into train, val, test.
+        4. save the splitted data (the data class accepts only csv paths).
+        5. initialize datasets.
+        6. create dataloaders.
+        7. return dataloaders.
     """
     import tiktoken
-    try:
-        df = pd.read_csv(csv_path)
-    except:
-        df = pd.read_csv("/content/miniGPT/SMSSpamCollection.csv", sep="\t", names=["Label", "Text"])
+    csv_path = Path(csv_path)
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Classification data not found at {csv_path}")
+
+    # The SMSSpamCollection is actually a TSV with no header
+    df = pd.read_csv(csv_path, sep="\t", names=["Label", "Text"])
     
-    random_split(df, 0.7, 0.1)
+    # ── BALANCE DATASET ──────────────────────────────────────────────────────
+    num_spam = df[df["Label"] == "spam"].shape[0]
+    ham_subset = df[df["Label"] == "ham"].sample(n=num_spam, random_state=123)
+    balanced_df = pd.concat([ham_subset, df[df["Label"] == "spam"]])
+    # ─────────────────────────────────────────────────────────────────────────
+
+    out_dir = Path(output_dir)
+    random_split(balanced_df, 0.7, 0.1, output_dir=out_dir)
     tokenizer = tiktoken.get_encoding("gpt2")
 
     train_dataset = SpamDataset(
-        csv_file="train.csv",
+        csv_file=out_dir / "train.csv",
         max_length=None,
         tokenizer=tokenizer
     )
     val_dataset = SpamDataset(
-        csv_file="validation.csv",
+        csv_file=out_dir / "validation.csv",
         max_length=train_dataset.max_length,
         tokenizer=tokenizer
     )
     test_dataset = SpamDataset(
-        csv_file="test.csv",
+        csv_file=out_dir / "test.csv",
         max_length=train_dataset.max_length,
         tokenizer=tokenizer
     )

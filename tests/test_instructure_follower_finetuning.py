@@ -49,7 +49,7 @@ def test_loading_model_returns_model_and_config_from_local_checkpoint(tmp_path, 
     }
 
     monkeypatch.setattr(
-        "train.instructure_follower_finetuning.MODEL_CONFIG", tiny_config
+        "finetune.instructure_follower_finetuning.MODEL_CONFIG", tiny_config
     )
 
     model = GPTModel(tiny_config)
@@ -79,7 +79,7 @@ def test_loading_model_from_hf_variant(monkeypatch):
         return mock_model, mock_config
 
     monkeypatch.setattr(
-        "train.instructure_follower_finetuning.load_from_hf", mock_load_from_hf
+        "finetune.instructure_follower_finetuning.load_from_hf", mock_load_from_hf
     )
 
     model, config = loading_model("gpt2")

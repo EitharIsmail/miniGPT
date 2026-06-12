@@ -1,30 +1,20 @@
 """
-train/modal_classification_train.py — Run GPT spam-classification fine-tuning on Modal.
+finetune/modal_classification_train.py — Run GPT spam-classification fine-tuning on Modal.
 
 Usage:
-    uv run python -m modal run train/modal_classification_train.py              # train
-    uv run python -m modal run train/modal_classification_train.py::download    # download latest checkpoint
-    uv run python -m modal run train/modal_classification_train.py::list_checkpoints
-
-Prerequisites:
-    uv run python -m modal token new    # one-time authentication
+    uv run python -m modal run finetune/modal_classification_train.py              # train
+    uv run python -m modal run finetune/modal_classification_train.py::download    # download latest checkpoint
+    uv run python -m modal run finetune/modal_classification_train.py::list_checkpoints
 """
 
 import os
 from pathlib import Path
-
 import modal
-
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
 ROOT = Path.cwd()
-DATA_DIR = ROOT / "spam-data"           # put SMSSpamCollection.csv here locally
-DATA_DIR.mkdir(exist_ok=True)
-
-REMOTE_DATA = "/data"                   # CSV splits written here at runtime
 REMOTE_CKPT = "/checkpoints"
-
 
 # ── Modal app + persistent volume ─────────────────────────────────────────────
 
@@ -61,8 +51,6 @@ image = (
             "*.png",
         ],
     )
-    # Mount the local spam-data/ folder so the CSV is available remotely
-    .add_local_dir(str(DATA_DIR), remote_path=REMOTE_DATA)
 )
 
 
@@ -77,33 +65,39 @@ def main() -> None:
 
 @app.local_entrypoint()
 def download() -> None:
-    """Download the latest checkpoint to the local machine."""
+    """Download the latest and best checkpoints to the local machine."""
     local_ckpt_dir = ROOT / "checkpoints"
     local_ckpt_dir.mkdir(exist_ok=True)
 
     all_files = list(volume.listdir("/"))
-    checkpoint_files: list[str] = sorted(
+    
+    # Files to download
+    target_filenames = ["best_model.pt"]
+    
+    # Also find the latest epoch checkpoint
+    checkpoint_files = sorted(
         f.path
         for f in all_files
         if f.path.startswith("epoch_") and f.path.endswith(".pt")
     )
+    if checkpoint_files:
+        target_filenames.append(checkpoint_files[-1])
+    
+    # Also get any images
+    target_filenames.extend([f.path for f in all_files if f.path.endswith(".png")])
 
-    if not checkpoint_files:
-        print("No checkpoints found in Modal volume.")
-        return
-
-    to_download: list[str] = [checkpoint_files[-1]] + [
-        f.path for f in all_files if f.path.endswith(".png")
-    ]
-
-    for filename in to_download:
+    for filename in target_filenames:
+        # Check if file actually exists in volume
+        if not any(f.path == filename for f in all_files):
+            continue
+            
         dest = local_ckpt_dir / filename
         print(f"Downloading {filename} → {dest}")
         with open(dest, "wb") as fh:
             for chunk in volume.read_file(filename):
                 fh.write(chunk)
 
-    print(f"\nDone. Latest checkpoint: checkpoints/{checkpoint_files[-1]}")
+    print(f"\nDone. Checkpoints saved to {local_ckpt_dir}")
 
 
 @app.local_entrypoint()
@@ -128,152 +122,56 @@ def list_checkpoints() -> None:
     image=image,
     gpu="A100",
     volumes={REMOTE_CKPT: volume},
-    #secrets=[modal.Secret.from_name("wandb-secret")],
+    secrets=[modal.Secret.from_name("wandb-secret")],
     timeout=8 * 3600,
 )
 def train_fn() -> None:
     """
     Fine-tune the miniGPT model for spam classification.
-
-    Runs remotely on a Modal A100. Loads the model variant defined in
-    ``config.VARIANT``, prepares the SMS spam dataset, and trains a binary
-    classifier by fine-tuning only the last transformer block and final norm.
-    Checkpoints are committed to the persistent Modal volume after each epoch.
     """
     import sys
     sys.path.insert(0, "/app")
 
-    import os
     import torch
-    import pandas as pd
-    import tiktoken
-    from torch.utils.data import Dataset, DataLoader
-
-    from config import HF_MODELS, MODEL_CONFIG, VARIANT
-    from inference.load_weights import load_from_hf
-    from model.gpt import GPTModel
+    import wandb
+    from config import VARIANT, data_dir_classification, MODEL_PRESET
+    from data.dataset import get_classification_dataloaders
+    from finetune.classification_finetuning import setup_classification_model
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Running on: {device}")
 
-    # ── Config ─────────────────────────────────────────────────────────────────
+    # ── W&B Init ───────────────────────────────────────────────────────────────
+    wandb.init(
+        project="sair-minigpt-classifier",
+        config={
+            "variant": VARIANT,
+            "preset": MODEL_PRESET,
+            "epochs": 20,
+            "lr": 5e-5,
+            "batch_size": 8,
+        }
+    )
 
-    BATCH_SIZE = 8
-    NUM_EPOCHS = 5
+    # ── Config ─────────────────────────────────────────────────────────────────
+    NUM_EPOCHS = 20
     LR = 5e-5
-    NUM_CLASSES = 2
 
     # ── Data preparation ───────────────────────────────────────────────────────
-
-    def create_balanced_dataset(df: pd.DataFrame) -> pd.DataFrame:
-        num_spam = df[df["Label"] == "spam"].shape[0]
-        ham_subset = df[df["Label"] == "ham"].sample(num_spam, random_state=123)
-        return pd.concat([ham_subset, df[df["Label"] == "spam"]])
-
-    def random_split(
-        df: pd.DataFrame, train_frac: float, validation_frac: float
-    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        df = df.sample(frac=1, random_state=123).reset_index(drop=True)
-        train_end = int(len(df) * train_frac)
-        val_end = train_end + int(len(df) * validation_frac)
-        return df[:train_end], df[train_end:val_end], df[val_end:]
-
-    raw_df = pd.read_csv(
-        f"{REMOTE_DATA}/SMSSpamCollection.csv", sep="\t", names=["Label", "Text"]
+    csv_remote_path = "/app/classification_data/SMSSpamCollection.csv"
+    print(f"Loading data from: {csv_remote_path}")
+    train_loader, val_loader, test_loader = get_classification_dataloaders(
+        csv_path=csv_remote_path,
+        output_dir=f"{REMOTE_CKPT}/data-splits"
     )
-    balanced_df = create_balanced_dataset(raw_df)
-    balanced_df["Label"] = balanced_df["Label"].map({"ham": 0, "spam": 1})
-
-    train_df, val_df, test_df = random_split(balanced_df, 0.7, 0.1)
-    print(f"Splits — train: {len(train_df)}, val: {len(val_df)}, test: {len(test_df)}")
-
-    # Write splits to volume so they can be inspected later
-    os.makedirs(REMOTE_CKPT, exist_ok=True)
-    train_df.to_csv(f"{REMOTE_CKPT}/train.csv", index=False)
-    val_df.to_csv(f"{REMOTE_CKPT}/validation.csv", index=False)
-    test_df.to_csv(f"{REMOTE_CKPT}/test.csv", index=False)
-
-    # ── Dataset & loaders ─────────────────────────────────────────────────────
-
-    class SpamDataset(Dataset):
-        def __init__(self, df: pd.DataFrame, tokenizer, max_length: int | None = None, pad_token_id: int = 50256):
-            self.data = df.reset_index(drop=True)
-            self.encoded_texts = [tokenizer.encode(text) for text in self.data["Text"]]
-            if max_length is None:
-                self.max_length = max(len(t) for t in self.encoded_texts)
-            else:
-                self.max_length = max_length
-                self.encoded_texts = [t[: self.max_length] for t in self.encoded_texts]
-            self.encoded_texts = [
-                t + [pad_token_id] * (self.max_length - len(t))
-                for t in self.encoded_texts
-            ]
-
-        def __len__(self) -> int:
-            return len(self.data)
-
-        def __getitem__(self, index: int):
-            return (
-                torch.tensor(self.encoded_texts[index], dtype=torch.long),
-                torch.tensor(self.data.iloc[index]["Label"], dtype=torch.long),
-            )
-
-    tokenizer = tiktoken.get_encoding("gpt2")
-    train_ds = SpamDataset(train_df, tokenizer)
-    val_ds   = SpamDataset(val_df,   tokenizer, max_length=train_ds.max_length)
-    test_ds  = SpamDataset(test_df,  tokenizer, max_length=train_ds.max_length)
-
-    torch.manual_seed(123)
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,  drop_last=True)
-    val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, drop_last=False)
-    test_loader  = DataLoader(test_ds,  batch_size=BATCH_SIZE, drop_last=False)
 
     # ── Model setup ───────────────────────────────────────────────────────────
-
-    def loading_model(variant: str) -> tuple[torch.nn.Module, dict]:
-        """Load a model from HuggingFace or a local checkpoint."""
-        if variant in HF_MODELS:
-            print(f"Loading pretrained model from HuggingFace: {variant}")
-            model, config = load_from_hf(variant)
-        else:
-            print(f"Loading model from checkpoint: {variant}")
-            model = GPTModel(MODEL_CONFIG).to(device)
-            model.load_state_dict(torch.load(variant, map_location=device))
-            config = MODEL_CONFIG
-        return model.to(device), config
-
-    def setup_classification_model(variant: str, num_classes: int = 2) -> tuple[torch.nn.Module, dict]:
-        """Load a pretrained GPT and adapt it for sequence classification."""
-        model, config = loading_model(variant)
-
-        param_count = sum(p.numel() for p in model.parameters())
-        print(f"Parameters: {param_count:,}")
-
-        for param in model.parameters():
-            param.requires_grad = False
-
-        torch.manual_seed(123)
-        model.out_head = torch.nn.Linear(
-            in_features=model.out_head.in_features,
-            out_features=num_classes,
-        )
-
-        for param in model.trf_blocks[-1].parameters():
-            param.requires_grad = True
-        for param in model.final_norm.parameters():
-            param.requires_grad = True
-
-        trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print(f"Trainable parameters: {trainable:,}")
-
-        return model, config
-
+    print(f"Setting up model for variant: {VARIANT}")
     model, config = setup_classification_model(VARIANT)
     model.to(device)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
-
-    def calc_accuracy_loader(data_loader: DataLoader, num_batches: int | None = None) -> float:
+    def calc_accuracy_loader(data_loader, num_batches=None):
         model.eval()
         correct, total = 0, 0
         limit = num_batches or len(data_loader)
@@ -288,10 +186,11 @@ def train_fn() -> None:
         return correct / total
 
     # ── Training loop ─────────────────────────────────────────────────────────
-
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()), lr=LR
     )
+
+    best_val_acc = 0.0
 
     for epoch in range(1, NUM_EPOCHS + 1):
         model.train()
@@ -308,22 +207,41 @@ def train_fn() -> None:
 
             if (step + 1) % 50 == 0:
                 print(f"  epoch {epoch} | step {step + 1}/{len(train_loader)} | loss {loss.item():.4f}")
+                wandb.log({"train/loss": loss.item(), "epoch": epoch, "step": step})
 
         train_acc = calc_accuracy_loader(train_loader, num_batches=10)
         val_acc   = calc_accuracy_loader(val_loader)
         avg_loss  = total_loss / len(train_loader)
+        
         print(f"Epoch {epoch}/{NUM_EPOCHS}  avg_loss={avg_loss:.4f}  train_acc={train_acc:.4f}  val_acc={val_acc:.4f}")
+        wandb.log({
+            "epoch": epoch,
+            "epoch/avg_loss": avg_loss,
+            "epoch/train_acc": train_acc,
+            "epoch/val_acc": val_acc,
+        })
 
         # Save per-epoch checkpoint
         ckpt_path = f"{REMOTE_CKPT}/epoch_{epoch}.pt"
         torch.save(model.state_dict(), ckpt_path)
+        
+        # Best model logic
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_path = f"{REMOTE_CKPT}/best_model.pt"
+            torch.save(model.state_dict(), best_path)
+            print(f"  ⭐ New best model! accuracy: {val_acc:.4f} → {best_path}")
+            wandb.run.summary["best_val_acc"] = best_val_acc
+
         volume.commit()
-        print(f"  ↳ checkpoint saved → {ckpt_path}")
 
     # ── Final test evaluation ──────────────────────────────────────────────────
-
+    print("\nLoading best model for final testing...")
+    model.load_state_dict(torch.load(f"{REMOTE_CKPT}/best_model.pt"))
     test_acc = calc_accuracy_loader(test_loader)
-    print(f"\nFinal test accuracy: {test_acc:.4f}")
+    print(f"Final test accuracy (Best Model): {test_acc:.4f}")
+    wandb.run.summary["test_acc"] = test_acc
 
+    wandb.finish()
     volume.commit()
     print("Training complete. Checkpoints saved to Modal volume.")
